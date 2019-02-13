@@ -5,17 +5,65 @@
 #include <errno.h>
 #include <time.h>
 
-static inline sem_t* get_current_semaphore(VALUE self)
-{
-    sem_t* sem = (sem_t*)rb_ivar_get(self, rb_intern("inner"));
-    if (sem == NULL) {
-        rb_raise(rb_eRuntimeError, "inner semaphore is not initialized");
-    }
-    return sem;
+#ifdef _WIN32
+   #error Windows not supported
+#elif __APPLE__
+// OSX has this deprecated and removed
+VALUE psem_waitmillis(VALUE self, VALUE rbNum_timeoutMillis) {
+    rb_raise(rb_eRuntimeError, "sem_timedwait() is deprecated on OSX");
+}
+// they also broke sem_getvalue to return 0 no matter what on a path
+// to deprecation
+VALUE psem_get_value(VALUE self) {
+    rb_raise(rb_eRuntimeError, "sem_getvalue() is deprecated on OSX");
+}
+#else
+VALUE psem_waitmillis(VALUE self, VALUE rbNum_timeoutMillis) {
+  Check_Type(rbNum_timeoutMillis, T_FIXNUM);
+
+  int ms = FIX2INT(rbNum_timeoutMillis);
+  struct timespec ts;
+  ts.tv_sec = ms / 1000;
+  ts.tv_nsec = (ms % 1000) * 1000000;
+
+  sem_t* sem = get_current_semaphore(self);
+  if (sem_timedwait(sem, &ts) == -1) {
+      int err = errno;
+      switch (err) {
+          case ETIMEDOUT:
+              return Qfalse;
+          case EINTR:
+              rb_raise(rb_eRuntimeError, "got interrupted by a signal handler (EINTR)");
+              break;
+          case EINVAL:
+              rb_raise(rb_eRuntimeError, "inner semaphore is not a valid semaphore (EINVAL)");
+              break;
+          default:
+              rb_raise(rb_eRuntimeError, "unknown errno: %d", err);
+      }
+  }
+  return Qtrue;
 }
 
-VALUE psem_unlink(VALUE self, VALUE rbStr_semName)
-{
+VALUE psem_get_value(VALUE self) {
+  sem_t* sem = get_current_semaphore(self);
+  int val = 0xFFFF;
+  if (sem_getvalue(sem, &val) == -1) {
+      rb_raise(rb_eRuntimeError, "inner semaphore is not a valid semaphore, failed with errno: %d", errno);
+  }
+  return INT2NUM(val);
+}
+#endif
+
+static inline sem_t* get_current_semaphore(VALUE self) {
+  sem_t* sem = (sem_t*)rb_ivar_get(self, rb_intern("inner"));
+  if (sem == NULL) {
+      rb_raise(rb_eRuntimeError, "inner semaphore is not initialized");
+  }
+  return sem;
+}
+
+VALUE psem_unlink(VALUE self, VALUE rbStr_semName) {
     Check_Type(rbStr_semName, T_STRING);
 
     // Check length and format of semaphore name
@@ -46,8 +94,7 @@ VALUE psem_unlink(VALUE self, VALUE rbStr_semName)
     return Qtrue;
 }
 
-VALUE psem_exists(VALUE self, VALUE rbStr_semName)
-{
+VALUE psem_exists(VALUE self, VALUE rbStr_semName) {
     Check_Type(rbStr_semName, T_STRING);
 
     // Check length and format of semaphore name
@@ -64,7 +111,8 @@ VALUE psem_exists(VALUE self, VALUE rbStr_semName)
         return Qtrue;
     }
     else {
-        switch (errno) {
+        int err = errno;
+        switch (err) {
             case ENOENT:
                 // Does not exist
                 return Qfalse;
@@ -73,20 +121,19 @@ VALUE psem_exists(VALUE self, VALUE rbStr_semName)
                 return Qtrue;
                 break;
             case ENAMETOOLONG:
-                rb_raise(rb_eRuntimeError, "name was too long");
+                rb_raise(rb_eRuntimeError, "name was too long (ENAMETOOLONG)");
                 break;
             case EINVAL:
-                rb_raise(rb_eRuntimeError, "given name consists only of / and nothing else");
+                rb_raise(rb_eRuntimeError, "name consists only of / and nothing else (EINVAL)");
                 break;
             default:
-                rb_raise(rb_eRuntimeError, "unknown error");
+                rb_raise(rb_eRuntimeError, "unknown errno: %d", err);
         }
     }
     return Qnil;
 }
 
-VALUE psem_initialize(VALUE self, VALUE rbStr_semName, VALUE rbNum_initialValue)
-{
+VALUE psem_initialize(VALUE self, VALUE rbStr_semName, VALUE rbNum_initialValue) {
     Check_Type(rbStr_semName, T_STRING);
     Check_Type(rbNum_initialValue, T_FIXNUM);
 
@@ -108,9 +155,7 @@ VALUE psem_initialize(VALUE self, VALUE rbStr_semName, VALUE rbNum_initialValue)
     // Create the semaphore
     sem_t* sem = sem_open(sem_name, O_CREAT, strtol("0644", 0, 8), initialValue);
     if (sem == SEM_FAILED) {
-        char buf[64];
-        snprintf(buf, 64, "sem_open() failed with errno: %d", errno);
-        rb_raise(rb_eRuntimeError, buf);
+        rb_raise(rb_eRuntimeError, "sem_open() failed with errno: %d", errno);
     }
 
     // Set inner
@@ -118,123 +163,84 @@ VALUE psem_initialize(VALUE self, VALUE rbStr_semName, VALUE rbNum_initialValue)
     return self;
 }
 
-VALUE psem_get_value(VALUE self)
-{
-    sem_t* sem = get_current_semaphore(self);
-    int val = 0xFFFF;
-    if (sem_getvalue(sem, &val) == -1) {
-        rb_raise(rb_eRuntimeError, "inner semaphore is not a valid semaphore");
-    }
-    return INT2NUM(val);
-}
-
-VALUE psem_post(VALUE self)
-{
+VALUE psem_post(VALUE self) {
     sem_t* sem = get_current_semaphore(self);
     if (sem_post(sem) == -1) {
-        switch (errno) {
+        int err = errno;
+        switch (err) {
             case EINVAL:
-                rb_raise(rb_eRuntimeError, "inner semaphore is not a valid semaphore");
+                rb_raise(rb_eRuntimeError, "inner semaphore is not a valid semaphore (EINVAL)");
                 break;
             case EOVERFLOW:
-                rb_raise(rb_eRuntimeError, "maximum allowable value for a semaphore would be exceeded");
+                rb_raise(rb_eRuntimeError, "maximum allowable value for a semaphore would be exceeded (EOVERFLOW)");
                 break;
             default:
-                rb_raise(rb_eRuntimeError, "unknown error");
+                rb_raise(rb_eRuntimeError, "unknown errno: %d", err);
         }
     }
     return Qnil;
 }
 
-VALUE psem_wait(VALUE self)
-{
+VALUE psem_wait(VALUE self) {
     sem_t* sem = get_current_semaphore(self);
     if (sem_wait(sem) == -1) {
-        switch (errno) {
+        int err = errno;
+        switch (err) {
             case EINTR:
-                rb_raise(rb_eRuntimeError, "got interrupted by a signal handler");
+                rb_raise(rb_eRuntimeError, "got interrupted by a signal handler (EINTR)");
                 break;
             case EINVAL:
-                rb_raise(rb_eRuntimeError, "inner semaphore is not a valid semaphore");
+                rb_raise(rb_eRuntimeError, "inner semaphore is not a valid semaphore (EINVAL)");
                 break;
             default:
-                rb_raise(rb_eRuntimeError, "unknown error");
+                rb_raise(rb_eRuntimeError, "unknown errno: %d", err);
         }
     }
     return Qtrue;
 }
 
-VALUE psem_trywait(VALUE self)
-{
+VALUE psem_trywait(VALUE self) {
     sem_t* sem = get_current_semaphore(self);
     if (sem_trywait(sem) == -1) {
-        switch (errno) {
+        int err = errno;
+        switch (err) {
             case EAGAIN:
                 return Qfalse;
             case EINTR:
-                rb_raise(rb_eRuntimeError, "got interrupted by a signal handler");
+                rb_raise(rb_eRuntimeError, "got interrupted by a signal handler (EINTR)");
                 break;
             case EINVAL:
-                rb_raise(rb_eRuntimeError, "inner semaphore is not a valid semaphore");
+                rb_raise(rb_eRuntimeError, "inner semaphore is not a valid semaphore (EINVAL)");
                 break;
             default:
-                rb_raise(rb_eRuntimeError, "unknown error");
+                rb_raise(rb_eRuntimeError, "unknown errno: %d", err);
         }
     }
     return Qtrue;
 }
 
-VALUE psem_waitmillis(VALUE self, VALUE rbNum_timeoutMillis)
-{
-    Check_Type(rbNum_timeoutMillis, T_FIXNUM);
-
-    int ms = FIX2INT(rbNum_timeoutMillis);
-    struct timespec ts;
-    ts.tv_sec = ms / 1000;
-    ts.tv_nsec = (ms % 1000) * 1000000;
-
-    sem_t* sem = get_current_semaphore(self);
-    if (sem_timedwait(sem, &ts) == -1) {
-        switch (errno) {
-            case ETIMEDOUT:
-                return Qfalse;
-            case EINTR:
-                rb_raise(rb_eRuntimeError, "got interrupted by a signal handler");
-                break;
-            case EINVAL:
-                rb_raise(rb_eRuntimeError, "inner semaphore is not a valid semaphore");
-                break;
-            default:
-                rb_raise(rb_eRuntimeError, "unknown error");
-        }
-    }
-    return Qtrue;
-}
-
-VALUE psem_close(VALUE self)
-{
+VALUE psem_close(VALUE self) {
     sem_t* sem = get_current_semaphore(self);
     if (sem_close(sem) == -1) {
-        switch (errno) {
+        int err = errno;
+        switch (err) {
             case EINVAL:
-                rb_raise(rb_eRuntimeError, "inner semaphore is not a valid semaphore");
+                rb_raise(rb_eRuntimeError, "inner semaphore is not a valid semaphore (EINVAL)");
                 break;
             default:
-                rb_raise(rb_eRuntimeError, "unknown error");
+                rb_raise(rb_eRuntimeError, "unknown errno: %d", err);
         }
     }
     return Qnil;
 }
 
-VALUE psem_get_inner(VALUE self)
-{
+VALUE psem_get_inner(VALUE self) {
     // Get inner as size_t type. Primarily for debugging purposes.
     size_t cast = (size_t)rb_ivar_get(self, rb_intern("inner"));
     return INT2NUM(cast);
 }
 
-void Init_psem()
-{
+void Init_psem() {
     VALUE psemClass = rb_define_class("PSem", rb_cObject);
 
     // Initialize (does not change the value of the semaphore if it already exists
