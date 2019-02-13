@@ -1,13 +1,9 @@
-Gem::Specification.new 'psem', '0.0.1' do |s|
+Gem::Specification.new 'psem', '0.2.1' do |s|
   s.name        = 'psem'
-  s.version     = '0.0.1'
-  s.date        = '2019-02-22'
+  s.version     = '0.2.1'
+  s.date        = '2019-02-13'
   s.summary     = 'A Simple Ruby Gem for POSIX Named Semaphores'
-  s.description = <<-EOF
-A named semaphore is identified by a name of the form /somename; that is, a null-terminated string of up to 251 characters consisting of an initial slash, followed by one or more characters, none of which are slashes. Two processes can operate on the same named semaphore by passing the same name to sem_open.
-
-The sem_open function creates a new named semaphore or opens an existing named semaphore. After the semaphore has been opened, it can be operated on using sem_post and sem_wait. When a process has finished using the semaphore, it can use sem_close to close the semaphore. When all processes have finished using the semaphore, it can be removed from the system using sem_unlink.
-  EOF
+  s.description = 'Supports named semaphores both on Linux and OSX. "get_value" and "timedwait" is deprecated on OSX but everything else is functional and safe.'
   s.authors     = ['Can Selcik']
   s.email       = 'selcik.can@gmail.com'
   s.files       = %w[lib/psem.rb ext/psem/psem.c ext/psem/extconf.rb test/psem_test.rb]
