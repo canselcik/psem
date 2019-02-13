@@ -95,8 +95,8 @@ VALUE psem_initialize(VALUE self, VALUE rbStr_semName, VALUE rbNum_initialValue)
     if (sem_name == NULL || strlen(sem_name) < 2 || sem_name[0] != '/') {
         rb_raise(rb_eRuntimeError, "invalid name. has to be in the format of '/foobar'");
     }
-    if (strlen(sem_name) > 253) {
-        rb_raise(rb_eRuntimeError, "name cannot be longer than 253 bytes long");
+    if (strlen(sem_name) > 251) {
+        rb_raise(rb_eRuntimeError, "name cannot be longer than 251 bytes long");
     }
 
     // Check initial value is positive
