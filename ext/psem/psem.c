@@ -5,6 +5,14 @@
 #include <errno.h>
 #include <time.h>
 
+static inline sem_t* get_current_semaphore(VALUE self) {
+  sem_t* sem = (sem_t*)rb_ivar_get(self, rb_intern("inner"));
+  if (sem == NULL) {
+      rb_raise(rb_eRuntimeError, "inner semaphore is not initialized");
+  }
+  return sem;
+}
+
 #ifdef _WIN32
    #error Windows not supported
 #elif __APPLE__
@@ -54,14 +62,6 @@ VALUE psem_get_value(VALUE self) {
   return INT2NUM(val);
 }
 #endif
-
-static inline sem_t* get_current_semaphore(VALUE self) {
-  sem_t* sem = (sem_t*)rb_ivar_get(self, rb_intern("inner"));
-  if (sem == NULL) {
-      rb_raise(rb_eRuntimeError, "inner semaphore is not initialized");
-  }
-  return sem;
-}
 
 VALUE psem_unlink(VALUE self, VALUE rbStr_semName) {
     Check_Type(rbStr_semName, T_STRING);
